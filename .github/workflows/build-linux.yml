@@ -5,6 +5,9 @@ on:
     tags: ["v*"]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -17,9 +20,20 @@ jobs:
       - name: Build release binary
         run: cargo build --release
 
-      - name: Upload artifact
+      - name: Upload artifact (manual runs)
+        if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
           name: rust-proxy-server-linux-amd64
           path: target/release/rust-proxy-server
 
+      - name: Prepare release asset (tagged runs)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: cp target/release/rust-proxy-server rust-proxy-server-linux-amd64
+
+      - name: Publish GitHub Release (tagged runs)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: rust-proxy-server-linux-amd64
+          generate_release_notes: true

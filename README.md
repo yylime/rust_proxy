@@ -75,7 +75,15 @@ Apple Silicon 上 Docker 会自动用 Rosetta 模拟 amd64 环境，首次构建
 
 ### 方式二：GitHub Actions（不需要本机 Docker）
 
-仓库里已带好 [.github/workflows/build-linux.yml](./.github/workflows/build-linux.yml)，推送到 GitHub 后手动触发，或在打 `v*` 标签时自动构建，产物作为 artifact 下载。
+仓库里已带好 [.github/workflows/build-linux.yml](./.github/workflows/build-linux.yml)：
+
+- 推送普通代码后，在 Actions 页面手动 **Run workflow**，产物作为 artifact 下载；
+- 打 `v*` 标签（如 `v0.1.0`）推送时，会自动构建并创建 **GitHub Release**，Release 页面可直接下载二进制：
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
 
 ### 方式三：cargo-zigbuild（不需要 Docker，需要 zig + cmake）
 
@@ -132,4 +140,3 @@ src/
   udp_relay.rs   # UDP 转发（按目标路由 / 双向拷贝）
   ...            # 移植自 shoes 的公共基础设施
 ```
-
