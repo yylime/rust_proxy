@@ -1,0 +1,39 @@
+[package]
+name = "rust-proxy-server"
+version = "0.1.0"
+edition = "2021"
+description = "A minimal Rust proxy server implementing Hysteria2 and AnyTLS server-side protocols, based on cfal/shoes."
+license = "MIT"
+
+[dependencies]
+aws-lc-rs = { version = "1", default-features = false }
+bytes = "1"
+env_logger = "0.11"
+futures = "0.3"
+h3 = "0.0.8"
+h3-quinn = "0.0.10"
+http = "1"
+log = "0.4"
+lru = "0.18"
+md-5 = "0.11"
+quinn = { version = "0.11", default-features = false, features = ["log", "runtime-tokio", "rustls-aws-lc-rs"] }
+rand = "0.10"
+rcgen = { version = "0.13", default-features = false, features = ["aws_lc_rs", "pem"] }
+rustc-hash = "2"
+rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "std", "tls12", "logging"] }
+rustls-pemfile = "2"
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+socket2 = "0.6"
+tokio = { version = "1", features = ["full"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["aws_lc_rs", "logging", "tls12"] }
+tokio-util = { version = "0.7", features = ["time"] }
+# Pinned because newer `time` versions (>= 0.3.45) and `rcgen` 0.14 require
+# rustc >= 1.88, while this project targets rustc 1.86. If you upgrade to
+# rustc >= 1.88 you may relax or remove these pins.
+time = "=0.3.44"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+strip = true

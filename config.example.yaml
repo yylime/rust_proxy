@@ -1,0 +1,40 @@
+# rust-proxy-server configuration
+#
+# Start with:  rust-proxy-server -c config.yaml
+#
+# At least one server section is required. If `cert`/`key` are omitted,
+# a self-signed certificate is generated in memory at startup (log a warning).
+
+log_level: info
+
+servers:
+  # ------------------------------------------------------------------
+  # Hysteria2 (QUIC / HTTP3)
+  # ------------------------------------------------------------------
+  - type: hysteria2
+    listen: "0.0.0.0:443"
+    password: "change-me-hy2"
+    udp_enabled: true
+    # TLS certificate for QUIC. Use a real certificate for production.
+    cert: "cert.pem"
+    key: "key.pem"
+    # ALPN protocols (default: ["h3"])
+    alpn:
+      - "h3"
+
+  # ------------------------------------------------------------------
+  # AnyTLS (TLS + multiplexing)
+  # ------------------------------------------------------------------
+  - type: anytls
+    listen: "0.0.0.0:8443"
+    cert: "cert.pem"
+    key: "key.pem"
+    udp_enabled: true
+    users:
+      - name: user1
+        password: "change-me-anytls"
+    # Optional custom padding scheme (default is the AnyTLS spec default)
+    # padding_scheme: |
+    #   stop=8
+    #   0=30-30
+    #   1=100-400

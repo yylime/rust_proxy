@@ -1,0 +1,11 @@
+This project is a focused re-implementation of the server-side Hysteria2 and
+AnyTLS protocols from the "shoes" project (https://github.com/cfal/shoes),
+which is distributed under the MIT license.
+
+The protocol logic (AnyTLS framing/multiplexing/padding, Hysteria2 HTTP/3 auth,
+UDP relay and stream handling) is ported from and inspired by shoes' current
+implementation (https://github.com/cfal/shoes), Copyright (c) 2025 cfal.
+
+This project removes the proxy-chaining/rules engine and other protocols, and
+forwards traffic directly to the requested destination.
+
