@@ -176,6 +176,13 @@ impl AnyTlsServerHandler {
             }
         }
         dest_stream.set_nodelay(true).ok();
+        if let Err(e) = crate::socket_util::set_tcp_keepalive(
+            &dest_stream,
+            std::time::Duration::from_secs(60),
+            std::time::Duration::from_secs(15),
+        ) {
+            log::debug!("AnyTLS FALLBACK: failed to set TCP keepalive: {e}");
+        }
 
         if !unconsumed_data.is_empty() {
             write_all(&mut dest_stream, unconsumed_data).await?;

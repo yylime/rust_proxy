@@ -15,6 +15,14 @@ pub async fn connect_tcp(
     let addr = resolver.resolve(location).await?;
     let stream = TcpStream::connect(addr).await?;
     let _ = stream.set_nodelay(true);
+    // Detect dead destination servers so stream tasks don't leak.
+    if let Err(e) = crate::socket_util::set_tcp_keepalive(
+        &stream,
+        std::time::Duration::from_secs(60),
+        std::time::Duration::from_secs(15),
+    ) {
+        log::debug!("Failed to set TCP keepalive on outbound connection: {e}");
+    }
     Ok(stream)
 }
 

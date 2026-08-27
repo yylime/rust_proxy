@@ -33,8 +33,10 @@ pub const UOT_V2_MAGIC_ADDRESS: &str = "sp.v2.udp-over-tcp.arpa";
 /// Timeout for control frame writes (matches reference implementation)
 const CONTROL_FRAME_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Maximum lifetime for a single stream handler (5 minutes).
-const STREAM_HANDLER_TIMEOUT: Duration = Duration::from_secs(300);
+/// Timeout for connecting to the destination server (30s).
+/// Only covers TCP connect + SYNACK; data transfer has no hard limit.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+
 
 /// AnyTLS Session manages multiplexed streams over a connection.
 pub struct AnyTlsSession {
@@ -305,23 +307,12 @@ impl AnyTlsSession {
                     let session_for_cleanup = Arc::clone(self);
 
                     let handle = tokio::spawn(async move {
-                        let result = tokio::time::timeout(
-                            STREAM_HANDLER_TIMEOUT,
-                            session.handle_new_stream(stream),
-                        )
-                        .await;
-
-                        match result {
-                            Ok(Ok(())) => {
+                        match session.handle_new_stream(stream).await {
+                            Ok(()) => {
                                 log::trace!("AnyTLS stream {stream_id_for_cleanup} completed");
                             }
-                            Ok(Err(e)) => {
+                            Err(e) => {
                                 log::debug!("AnyTLS stream {stream_id_for_cleanup} error: {e}");
-                            }
-                            Err(_) => {
-                                log::warn!(
-                                    "AnyTLS stream {stream_id_for_cleanup} timed out after {STREAM_HANDLER_TIMEOUT:?}"
-                                );
                             }
                         }
 
@@ -577,13 +568,24 @@ impl AnyTlsSession {
     ) -> io::Result<()> {
         let stream_id = stream.id();
 
-        let mut client_stream = match crate::dial::connect_tcp_with_cc(&destination, &self.resolver, self.resolver.tcp_congestion()).await
-        {
-            Ok(s) => s,
-            Err(e) => {
+        let connect_result = tokio::time::timeout(
+            CONNECT_TIMEOUT,
+            crate::dial::connect_tcp_with_cc(&destination, &self.resolver, self.resolver.tcp_congestion()),
+        )
+        .await;
+
+        let mut client_stream = match connect_result {
+            Ok(Ok(s)) => s,
+            Ok(Err(e)) => {
                 let error_msg = format!("connect failed: {e}");
                 let _ = self.send_synack(stream_id, Some(&error_msg)).await;
                 return Err(e);
+            }
+            Err(_elapsed) => {
+                let error_msg = format!("connect to {destination} timed out after {CONNECT_TIMEOUT:?}");
+                log::warn!("AnyTLS stream {stream_id}: {error_msg}");
+                let _ = self.send_synack(stream_id, Some(&error_msg)).await;
+                return Err(std::io::Error::other(error_msg));
             }
         };
 

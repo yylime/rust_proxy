@@ -116,7 +116,11 @@ async fn process_connection(
     cancel_token.cancel();
 
     if let Err(ref e) = result {
-        log::error!("Connection failed: {e}");
+        if e.to_string().contains("timed out") {
+            log::debug!("Connection ended (idle timeout): {e}");
+        } else {
+            log::error!("Connection failed: {e}");
+        }
         connection.close(CLOSE_ERR_CODE_OK.into(), b"");
     }
 
@@ -948,7 +952,11 @@ pub async fn run_server(
                 )
                 .await
                 {
-                    log::error!("Connection ended with error: {e}");
+                    if e.to_string().contains("timed out") {
+                        log::debug!("Connection ended (idle timeout): {e}");
+                    } else {
+                        log::error!("Connection ended with error: {e}");
+                    }
                 }
             });
         }
