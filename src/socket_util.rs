@@ -148,7 +148,7 @@ pub fn set_tcp_congestion(
         let raw_fd = tcp_stream.as_raw_fd();
         let socket2_sock =
             std::mem::ManuallyDrop::new(unsafe { Socket::from_raw_fd(raw_fd) });
-        socket2_sock.set_tcp_congestion(algorithm)?;
+        socket2_sock.set_tcp_congestion(algorithm.as_bytes())?;
         Ok(true)
     }
     #[cfg(not(target_os = "linux"))]
@@ -167,7 +167,7 @@ pub fn probe_tcp_congestion_available(algorithm: &str) -> bool {
     #[cfg(target_os = "linux")]
     {
         match Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP)) {
-            Ok(sock) => sock.set_tcp_congestion(algorithm).is_ok(),
+            Ok(sock) => sock.set_tcp_congestion(algorithm.as_bytes()).is_ok(),
             Err(_) => false,
         }
     }
