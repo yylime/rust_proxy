@@ -127,3 +127,73 @@ pub fn set_tcp_keepalive(
     }
 }
 
+// ---------------------------------------------------------------------------
+// TCP congestion control (BBR / cubic / …)
+// ---------------------------------------------------------------------------
+
+/// Set the TCP congestion control algorithm on a stream.
+///
+/// On Linux this calls `setsockopt(TCP_CONGESTION)`. On other platforms it
+/// is a no-op (returns `Ok(())`).
+///
+/// Returns `true` if the algorithm was actually set, `false` if it was
+/// skipped (non-Linux).
+pub fn set_tcp_congestion(
+    tcp_stream: &tokio::net::TcpStream,
+    algorithm: &str,
+) -> std::io::Result<bool> {
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::fd::AsRawFd;
+        let raw_fd = tcp_stream.as_raw_fd();
+        let socket2_sock =
+            std::mem::ManuallyDrop::new(unsafe { Socket::from_raw_fd(raw_fd) });
+        socket2_sock.set_tcp_congestion(algorithm)?;
+        Ok(true)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (tcp_stream, algorithm);
+        Ok(false)
+    }
+}
+
+/// Probe whether the given TCP congestion control algorithm is available
+/// on this system.
+///
+/// Creates a temporary socket and tries to set the algorithm, then
+/// discards the socket. Returns `true` if the algorithm is loadable.
+pub fn probe_tcp_congestion_available(algorithm: &str) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        match Socket::new(Domain::IPV4, Type::STREAM, Some(Protocol::TCP)) {
+            Ok(sock) => sock.set_tcp_congestion(algorithm).is_ok(),
+            Err(_) => false,
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = algorithm;
+        false
+    }
+}
+
+/// Read the currently-installed TCP congestion control modules from
+/// `/proc/sys/net/ipv4/tcp_available_congestion_control`.
+pub fn read_available_congestion_controls() -> Vec<String> {
+    #[cfg(target_os = "linux")]
+    {
+        match std::fs::read_to_string("/proc/sys/net/ipv4/tcp_available_congestion_control") {
+            Ok(s) => s
+                .split_whitespace()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect(),
+            Err(_) => Vec::new(),
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Vec::new()
+    }
+}

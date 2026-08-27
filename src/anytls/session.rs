@@ -577,7 +577,7 @@ impl AnyTlsSession {
     ) -> io::Result<()> {
         let stream_id = stream.id();
 
-        let mut client_stream = match crate::dial::connect_tcp(&destination, &self.resolver).await
+        let mut client_stream = match crate::dial::connect_tcp_with_cc(&destination, &self.resolver, self.resolver.tcp_congestion()).await
         {
             Ok(s) => s,
             Err(e) => {

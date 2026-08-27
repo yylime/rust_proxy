@@ -7,6 +7,12 @@
 
 log_level: info
 
+# TCP congestion control algorithm for outbound connections (default: "bbr").
+# Set to "" to use the system default (usually "cubic" on Linux).
+# BBR typically provides much better throughput on high-latency / lossy links.
+# Requires the kernel module:  modprobe tcp_bbr
+tcp_congestion: bbr
+
 servers:
   # ------------------------------------------------------------------
   # Hysteria2 (QUIC / HTTP3)
@@ -21,6 +27,9 @@ servers:
     # ALPN protocols (default: ["h3"])
     alpn:
       - "h3"
+    # Maximum concurrent connections (default: 4096).
+    # Set to 0 for unlimited (not recommended — may exhaust file descriptors).
+    # max_connections: 4096
 
   # ------------------------------------------------------------------
   # AnyTLS (TLS + multiplexing)
@@ -38,3 +47,6 @@ servers:
     #   stop=8
     #   0=30-30
     #   1=100-400
+    # Maximum concurrent connections (default: 4096).
+    # Set to 0 for unlimited (not recommended — may exhaust file descriptors).
+    # max_connections: 4096

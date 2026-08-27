@@ -843,6 +843,8 @@ pub struct Hysteria2ServerConfig {
     pub key: Option<String>,
     /// ALPN protocols (default `["h3"]`).
     pub alpn: Vec<String>,
+    /// Maximum concurrent connections. 0 means unlimited.
+    pub max_connections: u32,
 }
 
 /// Start the Hysteria2 server on the configured address.
@@ -870,6 +872,21 @@ pub async fn run_server(
 
     let quic_server_config = tls_material.into_quic()?;
     let hysteria2_password: &'static str = Box::leak(config.password.into_boxed_str());
+
+    // Connection limiting: a Semaphore permits up to max_connections
+    // concurrent tasks. When the limit is hit, accept blocks until a
+    // connection completes, providing backpressure instead of EMFILE.
+    let max_connections = config.max_connections;
+    let semaphore: Option<Arc<tokio::sync::Semaphore>> = if max_connections > 0 {
+        log::info!(
+            "Hysteria2 server connection limit: {} concurrent connections",
+            max_connections
+        );
+        Some(Arc::new(tokio::sync::Semaphore::new(max_connections as usize)))
+    } else {
+        log::warn!("Hysteria2 server running with no connection limit (may exhaust file descriptors)");
+        None
+    };
 
     let resolver = resolver.clone();
     Ok(tokio::spawn(async move {
@@ -910,8 +927,19 @@ pub async fn run_server(
         log::info!("Hysteria2 server listening on {bind_address}");
 
         while let Some(conn) = endpoint.accept().await {
+            // Acquire a connection permit before spawning, so we never
+            // exceed the configured limit.
+            let permit = if let Some(ref sem) = semaphore {
+                Some(sem.clone().acquire_owned().await.expect("semaphore closed"))
+            } else {
+                None
+            };
+
             let cloned_resolver = resolver.clone();
             tokio::spawn(async move {
+                // Keep the permit alive for the lifetime of this connection.
+                let _permit = permit;
+
                 if let Err(e) = process_connection(
                     cloned_resolver,
                     hysteria2_password,
@@ -926,3 +954,4 @@ pub async fn run_server(
         }
     }))
 }
+

@@ -20,15 +20,25 @@ struct CacheEntry {
 
 pub struct Resolver {
     cache: Mutex<LruCache<String, CacheEntry>>,
+    /// TCP congestion control algorithm for outbound connections
+    /// (e.g. "bbr", "cubic", or "" for system default).
+    tcp_congestion: String,
 }
 
 impl Resolver {
-    pub fn new() -> Self {
+
+    pub fn with_tcp_congestion(algo: String) -> Self {
         Self {
             cache: Mutex::new(LruCache::new(
                 NonZeroUsize::new(CACHE_SIZE).expect("CACHE_SIZE must be non-zero"),
             )),
+            tcp_congestion: algo,
         }
+    }
+
+    /// Returns the configured TCP congestion control algorithm.
+    pub fn tcp_congestion(&self) -> &str {
+        &self.tcp_congestion
     }
 
     /// Resolve a location into a concrete socket address.
@@ -78,4 +88,3 @@ async fn lookup_host(hostname: &str, port: u16) -> std::io::Result<SocketAddr> {
         .next()
         .ok_or_else(|| std::io::Error::other(format!("no addresses for {hostname}:{port}")))
 }
-

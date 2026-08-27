@@ -50,6 +50,32 @@ fn parse_log_level(level: &str) -> log::LevelFilter {
     }
 }
 
+/// Print TCP congestion control diagnostics at startup.
+fn log_congestion_control_diagnostics(algo: &str) {
+    if algo.is_empty() {
+        log::info!("TCP congestion control: system default (not configured)");
+        return;
+    }
+
+    log::info!("TCP congestion control configured: {algo}");
+
+    let available = socket_util::read_available_congestion_controls();
+    if !available.is_empty() {
+        log::info!("Available congestion controls: {}", available.join(", "));
+    }
+
+    let probed = socket_util::probe_tcp_congestion_available(algo);
+    if probed {
+        log::info!("TCP congestion control '{algo}' is available and will be applied to outbound connections");
+    } else {
+        log::warn!(
+            "TCP congestion control '{algo}' is NOT available on this system! \
+             Outbound connections will use the system default. \
+             Load it with: modprobe tcp_{algo}"
+        );
+    }
+}
+
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -91,6 +117,9 @@ async fn main() {
         .format_timestamp_secs()
         .init();
 
+    // --- TCP congestion control diagnostics ---
+    log_congestion_control_diagnostics(&config.tcp_congestion);
+
     if config.servers.is_empty() {
         eprintln!("No servers configured in {config_path}");
         std::process::exit(1);
@@ -120,7 +149,8 @@ async fn main() {
         return;
     }
 
-    let resolver = Arc::new(resolver::Resolver::new());
+    let tcp_congestion = config.tcp_congestion.clone();
+    let resolver = Arc::new(resolver::Resolver::with_tcp_congestion(tcp_congestion));
     let mut handles: Vec<JoinHandle<()>> = Vec::new();
 
     for server in config.servers.clone() {
@@ -134,6 +164,7 @@ async fn main() {
                     cert: cfg.cert,
                     key: cfg.key,
                     alpn: cfg.alpn,
+                    max_connections: cfg.max_connections,
                 };
                 match hysteria2::run_server(runtime_cfg, resolver).await {
                     Ok(h) => h,
@@ -156,6 +187,7 @@ async fn main() {
                         .collect(),
                     padding_scheme: cfg.padding_scheme,
                     fallback: cfg.fallback,
+                    max_connections: cfg.max_connections,
                 };
                 match anytls::server::run_server(runtime_cfg, resolver).await {
                     Ok(h) => h,

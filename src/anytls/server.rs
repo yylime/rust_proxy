@@ -6,9 +6,11 @@
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
+use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 
 use crate::address::NetLocation;
@@ -22,6 +24,10 @@ use crate::util::write_all;
 
 use aws_lc_rs::digest::{SHA256, digest};
 
+/// TLS handshake timeout — prevents a slow/client that never completes the
+/// handshake from holding a file descriptor indefinitely.
+const TLS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// AnyTLS server configuration (runtime, translated from YAML config).
 pub struct AnyTlsServerConfig {
     pub listen: String,
@@ -33,6 +39,8 @@ pub struct AnyTlsServerConfig {
     pub padding_scheme: Option<String>,
     /// Optional fallback destination for failed authentication.
     pub fallback: Option<NetLocation>,
+    /// Maximum concurrent connections. 0 means unlimited.
+    pub max_connections: u32,
 }
 
 struct AnyTlsServerHandler {
@@ -161,6 +169,12 @@ impl AnyTlsServerHandler {
         let dest_addr = self.resolver.resolve(fallback).await?;
 
         let mut dest_stream = TcpStream::connect(dest_addr).await?;
+        let cc = self.resolver.tcp_congestion();
+        if !cc.is_empty() {
+            if let Err(e) = crate::socket_util::set_tcp_congestion(&dest_stream, cc) {
+                log::warn!("AnyTLS FALLBACK: failed to set TCP congestion to {cc}: {e}");
+            }
+        }
         dest_stream.set_nodelay(true).ok();
 
         if !unconsumed_data.is_empty() {
@@ -197,6 +211,10 @@ impl AnyTlsServerHandler {
 
 /// Start the AnyTLS server: binds the TCP listener, accepts TLS connections
 /// and handles each in a spawned task.
+///
+/// Connection limiting via `max_connections` prevents file-descriptor
+/// exhaustion (EMFILE / "Too many open files"). A TLS handshake timeout
+/// prevents slow clients from holding fds indefinitely.
 pub async fn run_server(
     config: AnyTlsServerConfig,
     resolver: Arc<Resolver>,
@@ -233,15 +251,40 @@ pub async fn run_server(
         config.fallback,
     ));
 
+    // Connection limiting: a Semaphore permits up to max_connections
+    // concurrent tasks. When the limit is hit, accept blocks until a
+    // connection completes, providing backpressure instead of EMFILE.
+    let max_connections = config.max_connections;
+    let semaphore: Option<Arc<Semaphore>> = if max_connections > 0 {
+        log::info!(
+            "AnyTLS server connection limit: {} concurrent connections",
+            max_connections
+        );
+        Some(Arc::new(Semaphore::new(max_connections as usize)))
+    } else {
+        log::warn!("AnyTLS server running with no connection limit (may exhaust file descriptors)");
+        None
+    };
+
     let listener = crate::socket_util::new_tcp_listener(bind_address, 4096)?;
     log::info!("AnyTLS server listening on {bind_address}");
 
     Ok(tokio::spawn(async move {
         loop {
+            // Acquire a connection permit before accepting, so we never
+            // accept more connections than we can handle.
+            let permit = if let Some(ref sem) = semaphore {
+                Some(sem.clone().acquire_owned().await.expect("semaphore closed"))
+            } else {
+                None
+            };
+
             let (stream, addr) = match listener.accept().await {
                 Ok(v) => v,
                 Err(e) => {
                     log::error!("AnyTLS accept failed: {e}");
+                    // Drop the permit we just acquired so we don't leak it.
+                    drop(permit);
                     continue;
                 }
             };
@@ -260,10 +303,25 @@ pub async fn run_server(
             let acceptor = acceptor.clone();
             let handler = Arc::clone(&handler);
             tokio::spawn(async move {
-                let tls_stream = match acceptor.accept(stream).await {
-                    Ok(s) => s,
-                    Err(e) => {
+                // Keep the permit alive for the lifetime of this connection.
+                let _permit = permit;
+
+                // TLS handshake with timeout: if the client doesn't complete
+                // the handshake within TLS_HANDSHAKE_TIMEOUT, drop the
+                // connection and release the permit.
+                let tls_stream = match tokio::time::timeout(
+                    TLS_HANDSHAKE_TIMEOUT,
+                    acceptor.accept(stream),
+                )
+                .await
+                {
+                    Ok(Ok(s)) => s,
+                    Ok(Err(e)) => {
                         log::debug!("AnyTLS TLS handshake failed from {addr}: {e}");
+                        return;
+                    }
+                    Err(_elapsed) => {
+                        log::debug!("AnyTLS TLS handshake timeout from {addr}");
                         return;
                     }
                 };
